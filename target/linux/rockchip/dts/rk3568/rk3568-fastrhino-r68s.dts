@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 //
 // Lunzn FastRhino R68S - iStoreOS device tree overlay
-// PHY reset is handled by kernel patch (patches-6.6/135-*)
-// using standard reset-gpios bindings with correct timing.
+// Fix PHY reset: use standard reset-gpios instead of deprecated snps,reset-*
+// RTL8211F needs >=72ms deassert delay per datasheet.
 
 /dts-v1/;
 
@@ -12,4 +12,50 @@
 #include "rk3568-fastrhino-openwrt.dtsi"
 
 / {
+};
+
+/* Remove deprecated snps PHY reset from gmac nodes.
+ * Handled via standard reset-gpios in mdio nodes below. */
+&gmac0 {
+	/delete-property/ snps,reset-gpio;
+	/delete-property/ snps,reset-active-low;
+	/delete-property/ snps,reset-delays-us;
+};
+
+&gmac1 {
+	/delete-property/ snps,reset-gpio;
+	/delete-property/ snps,reset-active-low;
+	/delete-property/ snps,reset-delays-us;
+};
+
+/* Fix PHY reset for gmac0 (eth0, RTL8211F).
+ * Address 0x1 matches hardware MDIO bus.
+ * Pin GPIO1_PB0 matches pinctrl definition.
+ * Deassert 100ms (datasheet requires >=72ms). */
+&mdio0 {
+	/delete-node/ ethernet-phy@0;
+	rgmii_phy0: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+		pinctrl-0 = <&eth_phy0_reset_pin>;
+		pinctrl-names = "default";
+		reset-assert-us = <20000>;
+		reset-deassert-us = <100000>;
+		reset-gpios = <&gpio1 RK_PB0 GPIO_ACTIVE_LOW>;
+	};
+};
+
+/* Fix PHY reset for gmac1 (eth1, RTL8211F).
+ * Address 0x1, pin GPIO1_PB1. */
+&mdio1 {
+	/delete-node/ ethernet-phy@0;
+	rgmii_phy1: ethernet-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+		pinctrl-0 = <&eth_phy1_reset_pin>;
+		pinctrl-names = "default";
+		reset-assert-us = <20000>;
+		reset-deassert-us = <100000>;
+		reset-gpios = <&gpio1 RK_PB1 GPIO_ACTIVE_LOW>;
+	};
 };
