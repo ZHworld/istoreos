@@ -15,7 +15,7 @@ on:
 
 env:
   DEVICE: fastrhino_r6xs
-  BUILD_DIR: /tmp/openwrt
+  FORCE_UNSAFE_CONFIGURE: 1
 
 jobs:
   build:
@@ -31,16 +31,23 @@ jobs:
 
       - name: Verify patches
         run: |
-          echo "=== Installed patches ==="
-          ls -la target/linux/rockchip/patches-6.6/135-* 2>/dev/null || echo "WARNING: Patch 135 not found!"
+          echo "=== Patches check ==="
+          ls -la target/linux/rockchip/patches-6.6/13*.patch
+          # Check for naming conflicts
+          conflicts=$(ls target/linux/rockchip/patches-6.6/*.patch | sed 's/.*\///' | sed 's/-.*//' | sort | uniq -d)
+          if [ -n "$conflicts" ]; then
+            echo "❌ CONFLICT: Duplicate patch numbers:"
+            echo "$conflicts"
+            exit 1
+          fi
+          echo "✅ No conflicts"
 
       - name: Verify DTS change
         run: |
-          echo "=== R68S DTS overlay ==="
+          echo "=== R68S DTS ==="
           cat target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts
-          # Ensure no deprecated snps,reset is present
           if grep -q "snps,reset-gpio" target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts; then
-            echo "❌ ERROR: Deprecated snps,reset still present in DTS!"
+            echo "❌ Deprecated snps,reset still present!"
             exit 1
           fi
           echo "✅ DTS check passed"
@@ -81,30 +88,33 @@ jobs:
           CONFIG_IB=y
           CONFIG_JSON_OVERVIEW_IMAGE_INFO=y
           EOF
-          make defconfig
+          make defconfig 2>&1
 
       - name: Check prerequisites
-        run: |
-          make prereq 2>&1 | tail -30 || true
+        run: make prereq 2>&1
 
-      - name: Build firmware
+      - name: Build toolchain
+        run: make tools/toolchain -j$(nproc) 2>&1
+
+      - name: Build kernel and packages
         run: |
-          echo "Starting build for $DEVICE..."
-          echo "This will take 2-4 hours on first run (cached builds are faster)"
-          make -j$(nproc) 2>&1 | tail -50
-          echo "=== Build exit code: $? ==="
-          # Show firmware files
-          find bin/targets/rockchip/armv8/ -name "*.img*" -o -name "*manifest*" 2>/dev/null | head -10
+          set -o pipefail
+          make target/linux/compile package/compile -j$(nproc) V=sc 2>&1 | tail -100
+
+      - name: Build firmware image
+        run: |
+          set -o pipefail
+          make -j$(nproc) V=s 2>&1 | tail -100
 
       - name: Check firmware output
         run: |
           echo "=== Build output ==="
-          find bin/targets/rockchip/armv8/ -name "*fastrhino*" -o -name "*r6xs*" -o -name "*r68s*" 2>/dev/null | while read f; do
+          find bin/targets/ -name "*.img*" -o -name "*manifest*" -o -name "*r6xs*" -o -name "*r68s*" 2>/dev/null | while read f; do
             ls -lh "$f"
           done
           echo "---"
-          echo "All firmware files:"
-          ls -lh bin/targets/rockchip/armv8/ 2>/dev/null || echo "No output found"
+          echo "All targets:"
+          ls -lh bin/targets/rockchip/armv8/ 2>/dev/null || echo "No firmware found"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -117,4 +127,4 @@ jobs:
             bin/targets/rockchip/armv8/*.buildinfo
             bin/targets/rockchip/armv8/sha256sums
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: error
