@@ -1,0 +1,113 @@
+name: 🔧 Build R68S Custom Firmware
+
+on:
+  push:
+    branches: [istoreos-24.10]
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 'Target device'
+        required: true
+        default: 'fastrhino_r6xs'
+        type: choice
+        options:
+          - fastrhino_r6xs
+
+env:
+  DEVICE: fastrhino_r6xs
+  BUILD_DIR: /tmp/openwrt
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    if: github.repository != 'istoreos/istoreos'
+
+    steps:
+      - name: Checkout iStoreOS source
+        uses: actions/checkout@v4
+        with:
+          ref: istoreos-24.10
+          fetch-depth: 1
+
+      - name: Verify patches
+        run: |
+          echo "=== Installed patches ==="
+          ls -la target/linux/rockchip/patches-6.6/135-* 2>/dev/null || echo "WARNING: Patch 135 not found!"
+
+      - name: Verify DTS change
+        run: |
+          echo "=== R68S DTS overlay ==="
+          cat target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts
+          # Ensure no deprecated snps,reset is present
+          if grep -q "snps,reset-gpio" target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts; then
+            echo "❌ ERROR: Deprecated snps,reset still present in DTS!"
+            exit 1
+          fi
+          echo "✅ DTS check passed"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget \
+            libelf-dev patchelf xxd
+
+      - name: Restore downloads cache
+        uses: actions/cache@v4
+        id: cache-dl
+        with:
+          path: dl
+          key: dl-${{ hashFiles('**/CHECKSUM*', '**/*.hash', '**/Makefile') }}
+
+      - name: Restore build cache (toolchain)
+        uses: actions/cache@v4
+        id: cache-build
+        with:
+          path: |
+            staging_dir
+            build_dir
+            tmp
+          key: build-rockchip-${{ hashFiles('target/linux/rockchip/Makefile', 'toolchain/**') }}
+
+      - name: Configure for R68S
+        run: |
+          cat > .config << 'EOF'
+          CONFIG_TARGET_rockchip=y
+          CONFIG_TARGET_rockchip_armv8=y
+          CONFIG_TARGET_rockchip_armv8_DEVICE_fastrhino_r6xs=y
+          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+          CONFIG_TARGET_IMAGES_GZIP=y
+          CONFIG_IB=y
+          CONFIG_JSON_OVERVIEW_IMAGE_INFO=y
+          EOF
+          make defconfig
+
+      - name: Build firmware
+        run: |
+          echo "Starting build for $DEVICE..."
+          echo "This will take 2-4 hours on first run (cached builds are faster)"
+          make -j$(nproc) V=s 2>&1 | tail -100
+
+      - name: Check firmware output
+        run: |
+          echo "=== Build output ==="
+          find bin/targets/rockchip/armv8/ -name "*fastrhino*" -o -name "*r6xs*" -o -name "*r68s*" 2>/dev/null | while read f; do
+            ls -lh "$f"
+          done
+          echo "---"
+          echo "All firmware files:"
+          ls -lh bin/targets/rockchip/armv8/ 2>/dev/null || echo "No output found"
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: istoreos-r68s-firmware
+          path: |
+            bin/targets/rockchip/armv8/*.img.gz
+            bin/targets/rockchip/armv8/*.img
+            bin/targets/rockchip/armv8/*.manifest
+            bin/targets/rockchip/armv8/*.buildinfo
+            bin/targets/rockchip/armv8/sha256sums
+          retention-days: 30
+          if-no-files-found: warn

@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+//
+// Lunzn FastRhino R68S - iStoreOS device tree overlay
+// PHY reset is handled by kernel patch (patches-6.6/135-*)
+// using standard reset-gpios bindings with correct timing.
+
 /dts-v1/;
 
 #include <rockchip/rk3568-fastrhino-r68s.dts>
@@ -6,18 +12,4 @@
 #include "rk3568-fastrhino-openwrt.dtsi"
 
 / {
-};
-
-&gmac0 {
-	snps,reset-gpio = <&gpio1 RK_PB0 GPIO_ACTIVE_LOW>;
-	snps,reset-active-low;
-	/* Reset time is 15ms, 50ms for rtl8211f */
-	snps,reset-delays-us = <0 15000 50000>;
-};
-
-&gmac1 {
-	snps,reset-gpio = <&gpio1 RK_PB1 GPIO_ACTIVE_LOW>;
-	snps,reset-active-low;
-	/* Reset time is 15ms, 50ms for rtl8211f */
-	snps,reset-delays-us = <0 15000 50000>;
 };
