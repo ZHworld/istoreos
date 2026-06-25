@@ -4,17 +4,8 @@ on:
   push:
     branches: [istoreos-24.10]
   workflow_dispatch:
-    inputs:
-      device:
-        description: 'Target device'
-        required: true
-        default: 'fastrhino_r6xs'
-        type: choice
-        options:
-          - fastrhino_r6xs
 
 env:
-  DEVICE: fastrhino_r6xs
   FORCE_UNSAFE_CONFIGURE: 1
 
 jobs:
@@ -23,8 +14,7 @@ jobs:
     if: github.repository != 'istoreos/istoreos'
 
     steps:
-      - name: Checkout iStoreOS source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: istoreos-24.10
           fetch-depth: 1
@@ -33,19 +23,12 @@ jobs:
         run: |
           echo "=== Our patch ==="
           ls -la target/linux/rockchip/patches-6.6/136-arm64*
-          echo "✅ Patch 136 present"
-
-      - name: Verify DTS change
-        run: |
-          echo "=== R68S DTS ==="
+          echo "=== DTS ==="
           cat target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts
-          if grep -q "snps,reset-gpio" target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts; then
-            echo "❌ Deprecated snps,reset still present!"
-            exit 1
-          fi
-          echo "✅ DTS check passed"
+          if grep -q "snps,reset-gpio" target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts; then exit 1; fi
+          echo "✅ OK"
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential clang flex bison g++ gawk \
@@ -53,24 +36,22 @@ jobs:
             python3-setuptools python3-pyelftools rsync swig unzip zlib1g-dev file wget \
             libelf-dev patchelf xxd
 
-      - name: Restore downloads cache
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         id: cache-dl
         with:
           path: dl
           key: dl-${{ hashFiles('**/CHECKSUM*', '**/*.hash', '**/Makefile') }}
 
-      - name: Restore build cache (toolchain)
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         id: cache-build
         with:
           path: |
             staging_dir
             build_dir
             tmp
-          key: build-rockchip-${{ hashFiles('target/linux/rockchip/Makefile', 'toolchain/**') }}
+          key: build-rockchip-v2-${{ hashFiles('target/linux/rockchip/Makefile', 'toolchain/**') }}
 
-      - name: Configure for R68S
+      - name: Configure
         run: |
           cat > .config << 'EOF'
           CONFIG_TARGET_rockchip=y
@@ -78,47 +59,32 @@ jobs:
           CONFIG_TARGET_rockchip_armv8_DEVICE_fastrhino_r6xs=y
           CONFIG_TARGET_ROOTFS_SQUASHFS=y
           CONFIG_TARGET_IMAGES_GZIP=y
-          CONFIG_IB=y
-          CONFIG_JSON_OVERVIEW_IMAGE_INFO=y
           EOF
           make defconfig 2>&1
 
-      - name: Check prerequisites
-        run: make prereq 2>&1
-
-      - name: Build toolchain
+      - name: Build firmware
         run: |
-          set -o pipefail
-          make tools/toolchain -j$(nproc) 2>&1 | tail -20
+          echo "=== Building (may take 2-4 hours) ==="
+          make -j$(nproc) V=s 2>&1 | tee /tmp/build.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "=== Exit code: $EXIT_CODE ==="
+          tail -30 /tmp/build.log
+          # Show errors if any
+          if grep -q "failed to build\|ERROR:" /tmp/build.log 2>/dev/null; then
+            echo "=== ERROR CONTEXT ==="
+            grep -B5 "failed to build\|ERROR:" /tmp/build.log | tail -30
+          fi
+          exit $EXIT_CODE
 
-      - name: Build kernel and packages
+      - name: List firmware
         run: |
-          set -o pipefail
-          make target/linux/compile -j$(nproc) V=sc 2>&1 | tail -50
-
-      - name: Build firmware image
-        run: |
-          set -o pipefail
-          make -j$(nproc) 2>&1 | tail -50
-
-      - name: Check firmware output
-        run: |
-          echo "=== Build output ==="
-          find bin/targets/ -name "*.img*" -o -name "*manifest*" -o -name "*r6xs*" -o -name "*r68s*" 2>/dev/null | while read f; do
-            ls -lh "$f"
-          done
-          echo "---"
+          echo "=== Firmware files ==="
+          find bin/ -name "*.img*" -o -name "*r6xs*" -o -name "*r68s*" 2>/dev/null | head -10
           ls -lh bin/targets/rockchip/armv8/ 2>/dev/null || echo "No firmware found"
 
-      - name: Upload firmware artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: istoreos-r68s-firmware
-          path: |
-            bin/targets/rockchip/armv8/*.img.gz
-            bin/targets/rockchip/armv8/*.img
-            bin/targets/rockchip/armv8/*.manifest
-            bin/targets/rockchip/armv8/*.buildinfo
-            bin/targets/rockchip/armv8/sha256sums
-          retention-days: 30
+          path: bin/targets/rockchip/armv8/*.img.gz
           if-no-files-found: error
