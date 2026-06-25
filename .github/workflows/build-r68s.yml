@@ -23,8 +23,8 @@ jobs:
         run: |
           echo "=== R68S DTS ==="
           cat target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts
-          # Verify deprecated snps,reset is gone
-          if grep -q "snps,reset-gpio" target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts; then
+          # Verify deprecated snps,reset is gone (exclude /delete-property/ lines)
+          if grep "snps,reset" target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts | grep -qv "delete-property"; then
             echo "❌ Deprecated snps,reset still present!"
             exit 1
           fi
