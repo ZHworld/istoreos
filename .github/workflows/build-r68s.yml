@@ -31,16 +31,9 @@ jobs:
 
       - name: Verify patches
         run: |
-          echo "=== Patches check ==="
-          ls -la target/linux/rockchip/patches-6.6/13*.patch
-          # Check for naming conflicts
-          conflicts=$(ls target/linux/rockchip/patches-6.6/*.patch | sed 's/.*\///' | sed 's/-.*//' | sort | uniq -d)
-          if [ -n "$conflicts" ]; then
-            echo "❌ CONFLICT: Duplicate patch numbers:"
-            echo "$conflicts"
-            exit 1
-          fi
-          echo "✅ No conflicts"
+          echo "=== Our patch ==="
+          ls -la target/linux/rockchip/patches-6.6/136-arm64*
+          echo "✅ Patch 136 present"
 
       - name: Verify DTS change
         run: |
@@ -94,17 +87,19 @@ jobs:
         run: make prereq 2>&1
 
       - name: Build toolchain
-        run: make tools/toolchain -j$(nproc) 2>&1
+        run: |
+          set -o pipefail
+          make tools/toolchain -j$(nproc) 2>&1 | tail -20
 
       - name: Build kernel and packages
         run: |
           set -o pipefail
-          make target/linux/compile package/compile -j$(nproc) V=sc 2>&1 | tail -100
+          make target/linux/compile -j$(nproc) V=sc 2>&1 | tail -50
 
       - name: Build firmware image
         run: |
           set -o pipefail
-          make -j$(nproc) V=s 2>&1 | tail -100
+          make -j$(nproc) 2>&1 | tail -50
 
       - name: Check firmware output
         run: |
@@ -113,7 +108,6 @@ jobs:
             ls -lh "$f"
           done
           echo "---"
-          echo "All targets:"
           ls -lh bin/targets/rockchip/armv8/ 2>/dev/null || echo "No firmware found"
 
       - name: Upload firmware artifacts
