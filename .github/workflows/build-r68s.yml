@@ -19,14 +19,22 @@ jobs:
           ref: istoreos-24.10
           fetch-depth: 1
 
-      - name: Verify patches
+      - name: Verify DTS change
         run: |
-          echo "=== Our patch ==="
-          ls -la target/linux/rockchip/patches-6.6/136-arm64*
-          echo "=== DTS ==="
+          echo "=== R68S DTS ==="
           cat target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts
-          if grep -q "snps,reset-gpio" target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts; then exit 1; fi
-          echo "✅ OK"
+          # Verify deprecated snps,reset is gone
+          if grep -q "snps,reset-gpio" target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts; then
+            echo "❌ Deprecated snps,reset still present!"
+            exit 1
+          fi
+          # Verify mdio fix is present
+          if grep -q "reset-assert-us" target/linux/rockchip/dts/rk3568/rk3568-fastrhino-r68s.dts; then
+            echo "✅ PHY reset fix in place"
+          else
+            echo "❌ Missing PHY reset fix!"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: |
@@ -69,7 +77,6 @@ jobs:
           EXIT_CODE=${PIPESTATUS[0]}
           echo "=== Exit code: $EXIT_CODE ==="
           tail -30 /tmp/build.log
-          # Show errors if any
           if grep -q "failed to build\|ERROR:" /tmp/build.log 2>/dev/null; then
             echo "=== ERROR CONTEXT ==="
             grep -B5 "failed to build\|ERROR:" /tmp/build.log | tail -30
@@ -78,9 +85,8 @@ jobs:
 
       - name: List firmware
         run: |
-          echo "=== Firmware files ==="
           find bin/ -name "*.img*" -o -name "*r6xs*" -o -name "*r68s*" 2>/dev/null | head -10
-          ls -lh bin/targets/rockchip/armv8/ 2>/dev/null || echo "No firmware found"
+          ls -lh bin/targets/rockchip/armv8/ 2>/dev/null || echo "No firmware"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
